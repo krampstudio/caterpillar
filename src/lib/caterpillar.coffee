@@ -1,161 +1,185 @@
 # Import
 extendr = require('extendr')
-stream = require('readable-stream')
+stream = null
 
-# Transform
-class Transform extends stream.Transform
-	config: null
+# Define
+defineCaterpillar = ->
+	# Transform
+	module.exports.Transform = \
+	class Transform extends stream.Transform
+		config: null
 
-	constructor: (opts) ->
-		@config = extendr.deepClone(@config)
-		@setConfig(opts)
-		super
+		constructor: (opts) ->
+			@config = extendr.deepClone(@config)
+			@setConfig(opts)
+			super
 
-	pipe: (child) ->
-		if child.setConfig?(@config) then @on('config', child.setConfig)
-		super
+		pipe: (child) ->
+			if child.setConfig?(@config)
+				@on('setConfig', child.setConfig.bind(child))
+			if child.log?
+				@on 'log', (args...) =>
+					if @config.dry is true
+						child.log.apply(child, args)
+			super
 
-	setConfig: (opts) =>
-		extendr.deepExtend(@config, opts)
-		@emit('config', @config)
-		@
+		setConfig: (opts) ->
+			extendr.deepExtend(@config, opts)
+			@emit('setConfig', opts)
+			@
 
-	getConfig: ->
-		return @config
+		getConfig: ->
+			return @config
 
-	_transform: (chunk, encoding, next) =>
-		entry = JSON.parse(chunk.toString())
-		message = @format(entry)
-		message = JSON.stringify(message)  if message
-		return next(null, message)
+		format: (entry) ->
+			return entry
 
-	format: (entry) ->
-		return entry
+		# Log via write
+		_transform: (chunk, encoding, next) ->
+			# Prepare
+			entry = JSON.parse(chunk.toString())
+			message = @format(entry)
 
-# Logger
-class Logger extends Transform
-	config:
-		levels:
-			emergency: 0
-			alert: 1
-			critical: 2
-			error: 3
-			warning: 4
-			notice: 5
-			info: 6
-			debug: 7
+			# Write
+			if message
+				@emit('log', message)
+				message = JSON.stringify(message)
 
-			emerg: 0
-			crit: 2
-			err: 3
-			warn: 4
-			note: 5
+			# Complete
+			return next(null, message)
 
-			default: 6
+		# Log via user
+		log: (entry) ->
+			# Log the entry
+			if @config.dry is true
+				message = @format(entry)
+				@emit('log', message)  if message
 
-	_transform: (chunk, encoding, next) ->
-		return next(null, chunk)
-
-	getLevelNumber: (name) ->
-		return @config.levels[name] ? null
-
-	getLevelName: (number) ->
-		# Try to treturn the levelName
-		for own key,value of @config.levels
-			if value is number
-				return key
-
-		# Return
-		return null
-
-	getLevelInfo: (level) ->
-		# Prepare
-		result =
-			levelNumber: null
-			levelName: null
-			defaulted: false
-
-		# Log the entry
-		if typeof level is 'number'
-			levelNumber = level
-			levelName = @getLevelName(levelNumber)
-		else
-			levelName = level
-			levelNumber = @getLevelNumber(levelName)
-			levelName = @getLevelName(levelNumber)
-			unless levelNumber?
-				levelNumber = @getLevelNumber('default')
-				levelName = @getLevelName(levelNumber)
-				result.defaulted = true
-
-		# Apply
-		result.levelNumber = levelNumber
-		result.levelName = levelName
-
-		# Return
-		return result
-
-	getLineInfo: ->
-		# Prepare
-		result =
-			line: -1
-			method: 'unknown'
-			file: 'unknown'
-
-		# Retrieve
-		err = new Error()
-		lines = err.stack?.split('\n') or []  # ios devices do not have err.stack available
-		for line in lines
-			continue  if line.indexOf(__dirname) isnt -1 or line.indexOf(' at ') is -1
-			parts = line.split(':')
-			if parts[0].indexOf('(') is -1
-				result.method = 'unknown'
-				result.file = parts[0].replace(/^.+?\s+at\s+/, '')
+			# Write the entry
 			else
-				result.method = parts[0].replace(/^.+?\s+at\s+/, '').replace(/\s+\(.+$/, '')
-				result.file = parts[0].replace(/^.+?\(/, '')
-			result.line = parts[1]
-			break
+				message = JSON.stringify(entry)
+				@write(message)  # goes through transform
 
-		# Return
-		return result
+			# Chain
+			@
 
-	format: (level, args...) ->
-		# Prepare
-		entry = {}
-		entry.date = new Date().toISOString()
+	# Logger
+	module.exports.Logger = \
+	class Logger extends Transform
+		config:
+			levels:
+				emergency: 0
+				alert: 1
+				critical: 2
+				error: 3
+				warning: 4
+				notice: 5
+				info: 6
+				debug: 7
 
-		# Prepare
-		levelInfo  = @getLevelInfo(level)
-		lineInfo   = @getLineInfo(level)
+				emerg: 0
+				crit: 2
+				err: 3
+				warn: 4
+				note: 5
 
-		# Add the level to the message arguments if it was not a level
-		args.unshift(level)  if levelInfo.defaulted and level isnt 'default'
-		delete levelInfo.defaulted
+				default: 6
 
-		# Apply
-		entry.args = args
-		extendr.extend(entry, levelInfo, lineInfo)
+		getLevelNumber: (name) ->
+			return @config.levels[name] ? null
 
-		# Return
-		return entry
+		getLevelName: (number) ->
+			# Try to treturn the levelName
+			for own key,value of @config.levels
+				if value is number
+					return key
 
-	log: (args...) ->
-		# Prepare
-		entry = @format(args...)
+			# Return
+			return null
 
-		# Emit the entry
-		@emit('log', entry)
+		getLevelInfo: (level) ->
+			# Prepare
+			result =
+				levelNumber: null
+				levelName: null
+				defaulted: false
 
-		# Write the entry
-		entryString = JSON.stringify(entry)
-		@write(entryString)
+			# Log the entry
+			if typeof level is 'number'
+				levelNumber = level
+				levelName = @getLevelName(levelNumber)
+			else
+				levelName = level
+				levelNumber = @getLevelNumber(levelName)
+				levelName = @getLevelName(levelNumber)
+				unless levelNumber?
+					levelNumber = @getLevelNumber('default')
+					levelName = @getLevelName(levelNumber)
+					result.defaulted = true
 
-		# Chain
-		@
+			# Apply
+			result.levelNumber = levelNumber
+			result.levelName = levelName
 
-# Export
-module.exports = {
-	Transform
-	Logger
-}
+			# Return
+			return result
+
+		getLineInfo: ->
+			# Prepare
+			result =
+				line: -1
+				method: 'unknown'
+				file: 'unknown'
+
+			# Retrieve
+			err = new Error()
+			lines = err.stack?.split('\n') or []  # ios devices do not have err.stack available
+			for line in lines
+				continue  if line.indexOf(__dirname) isnt -1 or line.indexOf(' at ') is -1
+				parts = line.split(':')
+				if parts[0].indexOf('(') is -1
+					result.method = 'unknown'
+					result.file = parts[0].replace(/^.+?\s+at\s+/, '')
+				else
+					result.method = parts[0].replace(/^.+?\s+at\s+/, '').replace(/\s+\(.+$/, '')
+					result.file = parts[0].replace(/^.+?\(/, '')
+				result.line = parts[1]
+				break
+
+			# Return
+			return result
+
+		format: (entry) ->
+			# Prepare
+			[level,args...] = entry
+			entry = {}
+			entry.date = new Date().toISOString()
+
+			# Prepare
+			levelInfo  = @getLevelInfo(level)
+			lineInfo   = @getLineInfo(level)
+
+			# Add the level to the message arguments if it was not a level
+			args.unshift(level)  if levelInfo.defaulted and level isnt 'default'
+			delete levelInfo.defaulted
+
+			# Apply
+			entry.args = args
+			extendr.extend(entry, levelInfo, lineInfo)
+
+			# Return
+			return entry
+
+		log: (args...) ->
+			return super(args)
+
+
+# Load
+stream = require('stream')
+if stream.Transform?
+	defineCaterpillar()
+else
+	require('lazy-require').lazyRequire 'readable-stream', (err,m) ->
+		throw err  if err
+		stream = m
+		defineCaterpillar()

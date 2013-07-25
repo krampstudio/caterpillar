@@ -8,7 +8,7 @@ joe = require('joe')
 cleanChanging = (item) ->
 	item = JSON.parse(item)
 	item.date = item.date.replace(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z$/, 'date')
-	item.file = item.file.replace(/^[\/\\].+$/, 'file')
+	item.file = item.file.replace(/^.+$/, 'file')
 	item.line = item.file.replace(/^\d{1,}$/, 'line')
 	item.method = item.method.replace(/^[\d\w\.]+$/, 'method')
 	return item
@@ -87,8 +87,8 @@ joe.describe 'caterpillar', (describe,it) ->
 			output.on 'end', ->
 				#console.log actual
 				actual = actual.map(cleanChanging)
-				expect(actual.length).to.equal(expected.length)
+				expect(actual.length, 'length check').to.equal(expected.length)
 				for result,index in actual
-					expect(result).to.deep.equal(expected[index])
+					expect(result, 'deep check').to.deep.equal(expected[index])
 				done()
 			logger.end()
